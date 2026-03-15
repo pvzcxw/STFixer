@@ -11,7 +11,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishTrimmed>true</PublishTrimmed>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <Version>1.0.1</Version>
+    <Version>1.0.2</Version>
     <NoWarn>CA1416</NoWarn>
   </PropertyGroup>
 
