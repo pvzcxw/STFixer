@@ -53,10 +53,10 @@ namespace CloudFix
                             PrintLine(line.TrimEnd('\r'));
                         Console.WriteLine();
                     }
-                    Console.Write("  Download and install? [y/N] ");
+                    Console.Write("  Download and install? [Y/n] ");
                     var key = Console.ReadKey(true);
                     Console.WriteLine(key.KeyChar);
-                    if (key.KeyChar is 'y' or 'Y')
+                    if (key.KeyChar is not ('n' or 'N'))
                     {
                         Updater.ApplyUpdate(updateTask.Result).GetAwaiter().GetResult();
                         return;
