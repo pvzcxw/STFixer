@@ -30,3 +30,4 @@ CloudFix patches the SteamTools DLL and its encrypted payload cache to prevent i
 - If SteamTools updates, you may need to re-run CloudFix
 - The tool checks for updates on launch
 - This tool is likely to break with an update to SteamTools, but I use SteamTools personally so you can expect me to keep it up to date.
+- If you get a Capcom save error even after enabling this tool, disable Steam Cloud, clear the userdata folder for the game (`<Steam install path>\userdata\<steamid>\<appid>`), restart Steam, and try again.
