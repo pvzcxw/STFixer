@@ -19,7 +19,7 @@ This tool fixes this behavior by disabling the SteamTools cloud "fix" and instea
 
 To undo the patch, run CloudFix again and select **Disable**.
 
-If you get a Capcom save error even after enabling this tool, disable Steam Cloud, clear the userdata folder for the game (`<Steam install path>\userdata\<steamid>\<appid>`), restart Steam, and try again.
+If you get a Capcom save error even after enabling this tool, disable Steam Cloud for the affected game in the Steam properties page for that game, clear the userdata folder for the game (`<Steam install path>\userdata\<steamid>\<appid>`), restart Steam, and try again.
 
 ## What we do
 
