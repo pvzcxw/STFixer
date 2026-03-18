@@ -24,7 +24,7 @@ namespace CloudFix
 
         static void Main(string[] args)
         {
-            try { Console.Title = "CloudFix"; } catch { }
+            try { Console.Title = "STFixer"; } catch { }
             ClearScreen();
             PrintHeader();
 
@@ -82,9 +82,10 @@ namespace CloudFix
                 RunDiagnostics(patcher);
                 PrintSep();
                 Console.WriteLine();
-                Console.WriteLine("  1. Enable  (patch SteamTools)");
-                Console.WriteLine("  2. Disable (restore originals)");
-                Console.WriteLine("  3. Exit");
+                Console.WriteLine("  1. Setup SteamTools offline");
+                Console.WriteLine("  2. Enable  (patch cloud saves)");
+                Console.WriteLine("  3. Disable (restore originals)");
+                Console.WriteLine("  4. Exit");
                 Console.WriteLine();
                 Console.Write("  > ");
 
@@ -95,6 +96,26 @@ namespace CloudFix
                 switch (choice.KeyChar)
                 {
                     case '1':
+                        ClearScreen();
+                        PrintHeader();
+                        PrintLine($"Steam: {_steamPath}");
+                        PrintSep();
+                        Console.WriteLine();
+                        var setupResult = patcher.ApplyOfflineSetup();
+                        Console.WriteLine();
+                        if (setupResult.Succeeded)
+                        {
+                            PrintGreen("Offline setup: done");
+                            OfferSteamRestart();
+                        }
+                        else
+                        {
+                            PrintRed($"Error: {setupResult.Error}");
+                            WaitForKey();
+                        }
+                        break;
+
+                    case '2':
                         ClearScreen();
                         PrintHeader();
                         PrintLine($"Steam: {_steamPath}");
@@ -114,7 +135,7 @@ namespace CloudFix
                         }
                         break;
 
-                    case '2':
+                    case '3':
                         ClearScreen();
                         PrintHeader();
                         PrintLine($"Steam: {_steamPath}");
@@ -134,20 +155,16 @@ namespace CloudFix
                         }
                         break;
 
-                    case '3':
+                    case '4':
                         return;
-
-                    default:
-                        break;
                 }
             }
         }
 
         static void RunDiagnostics(Patcher patcher)
         {
-            var state = patcher.GetPatchState();
-
-            string label = state switch
+            var cloudState = patcher.GetPatchState();
+            string cloudLabel = cloudState switch
             {
                 PatchState.NotInstalled => "SteamTools not detected",
                 PatchState.Unpatched => "not patched",
@@ -157,11 +174,29 @@ namespace CloudFix
                 _ => "unknown"
             };
 
-            bool good = state == PatchState.Patched;
-            if (good)
-                PrintGreen($"Cloud Fix: {label}");
+            if (cloudState == PatchState.Patched)
+                PrintGreen($"Cloud Fix: {cloudLabel}");
             else
-                PrintRed($"Cloud Fix: {label}");
+                PrintRed($"Cloud Fix: {cloudLabel}");
+
+            if (cloudState == PatchState.NotInstalled)
+                return;
+
+            var offlineState = patcher.GetOfflinePatchState();
+            string offlineLabel = offlineState switch
+            {
+                PatchState.Unpatched => "not patched",
+                PatchState.Patched => "patched",
+                PatchState.PartiallyPatched => "partially patched",
+                PatchState.UnknownVersion => "unknown payload version",
+                PatchState.NotInstalled => "payload not found",
+                _ => "unknown"
+            };
+
+            if (offlineState == PatchState.Patched)
+                PrintGreen($"Offline:    {offlineLabel}");
+            else
+                PrintRed($"Offline:    {offlineLabel}");
         }
 
         static string DetectSteamPath()
@@ -204,8 +239,8 @@ namespace CloudFix
         static void PrintHeader()
         {
             Console.WriteLine();
-            Console.WriteLine($"  CloudFix v{_version}");
-            Console.WriteLine("  Steam Cloud save fix for SteamTools");
+            Console.WriteLine($"  STFixer v{_version}");
+            Console.WriteLine("  SteamTools patcher");
             Console.WriteLine();
         }
 

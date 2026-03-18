@@ -43,6 +43,13 @@ namespace CloudFix
             return null;
         }
 
+        public static string GetExpectedCachePath(string steamPath)
+        {
+            var cacheDir = Path.Combine(steamPath, "appcache", "httpcache", "3b");
+            var fp = Compute();
+            return Path.Combine(cacheDir, fp);
+        }
+
         static unsafe string Compute()
         {
             // CPUID leaf 0 -> vendor string

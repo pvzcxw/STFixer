@@ -40,6 +40,12 @@ namespace CloudFix
             new PatchEntry(0x1D555A,
                 new byte[] { 0x89, 0x3D, 0x28, 0xD5, 0xFE, 0xFF },
                 new byte[] { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 }),
+            new PatchEntry(0x1E0A15,
+                new byte[] { 0xC6, 0x05, 0xC6, 0x20, 0xFE, 0xFF, 0x00 },
+                new byte[] { 0xC6, 0x05, 0xC6, 0x20, 0xFE, 0xFF, 0x01 }),
+            new PatchEntry(0x3BAE0,
+                new byte[] { 0x75 },
+                new byte[] { 0xEB }),
         };
 
         string _steamPath;
@@ -109,6 +115,168 @@ namespace CloudFix
             return PatchState.PartiallyPatched;
         }
 
+        public PatchState GetOfflinePatchState()
+        {
+            _verbose = false;
+
+            var cachePath = Fingerprint.FindCachePath(_steamPath);
+            if (cachePath == null)
+                return PatchState.NotInstalled;
+
+            byte[] raw;
+            try
+            {
+                using var fs = new FileStream(cachePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                raw = new byte[fs.Length];
+                fs.ReadExactly(raw);
+            }
+            catch (IOException) { return PatchState.NotInstalled; }
+
+            if (raw.Length < 32)
+                return PatchState.UnknownVersion;
+
+            byte[] payload;
+            try
+            {
+                var iv = raw.AsSpan(0, 16).ToArray();
+                var ct = raw.AsSpan(16).ToArray();
+                var dec = AesCbcDecrypt(ct, AesKey, iv);
+                using var zIn = new ZLibStream(
+                    new MemoryStream(dec, 4, dec.Length - 4),
+                    CompressionMode.Decompress);
+                using var ms = new MemoryStream();
+                zIn.CopyTo(ms);
+                payload = ms.ToArray();
+            }
+            catch { return PatchState.UnknownVersion; }
+
+            var resolved = ResolveSetupPatchOffsets(payload);
+            if (resolved == null)
+                return PatchState.UnknownVersion;
+
+            var (_, applied, skipped, errors) = CheckPatches(payload, resolved);
+
+            if (errors.Count > 0)
+                return PatchState.UnknownVersion;
+            if (applied == 0 && skipped == resolved.Length)
+                return PatchState.Patched;
+            if (skipped == 0 && applied == resolved.Length)
+                return PatchState.Unpatched;
+
+            return PatchState.PartiallyPatched;
+        }
+
+        public PatchResult ApplyOfflineSetup()
+        {
+            _verbose = true;
+            var result = new PatchResult();
+
+            try
+            {
+                var hijackDll = FindCoreDll();
+                if (hijackDll == null)
+                    return result.Fail("SteamTools Core DLL not found. Is SteamTools installed?");
+
+                var dllPath = Path.Combine(_steamPath, hijackDll);
+                var dllData = File.ReadAllBytes(dllPath);
+
+                Log($"Patching {hijackDll}..");
+                var resolvedCore = ResolveCorePatchOffsets(dllData);
+                if (resolvedCore == null)
+                    return result.Fail($"Could not identify patch locations in {hijackDll} - unsupported version?");
+
+                Backup(dllPath);
+
+                var (patchedDll, dllApplied, dllSkipped, dllErrors) = ApplyPatches(dllData, resolvedCore);
+                if (dllErrors.Count > 0)
+                {
+                    foreach (var err in dllErrors) Log(err);
+                    return result.Fail("Byte mismatch in " + hijackDll + " - wrong version?");
+                }
+
+                if (dllApplied > 0)
+                {
+                    File.WriteAllBytes(dllPath, patchedDll);
+                    Log($"  {dllApplied} patch(es) applied" + (dllSkipped > 0 ? $", {dllSkipped} already done" : ""));
+                }
+                else
+                {
+                    Log("  Already patched");
+                }
+                result.DllPatched = true;
+
+                var cachePath = Fingerprint.FindCachePath(_steamPath);
+                if (cachePath == null)
+                {
+                    Log("Payload cache not found. Deploying embedded payload..");
+                    cachePath = DeployEmbeddedPayload();
+                    if (cachePath == null)
+                        return result.Fail("Could not deploy payload cache.");
+                }
+
+                Log("Patching payload (offline setup)..");
+                Backup(cachePath);
+
+                var raw = File.ReadAllBytes(cachePath);
+                if (raw.Length < 32)
+                    return result.Fail("Cache file too small");
+
+                var iv = raw.AsSpan(0, 16).ToArray();
+                var ct = raw.AsSpan(16).ToArray();
+
+                Log("  Decrypting..");
+                byte[] dec;
+                try { dec = AesCbcDecrypt(ct, AesKey, iv); }
+                catch (Exception ex) { return result.Fail($"Decryption failed: {ex.Message}"); }
+
+                byte[] payload;
+                try
+                {
+                    using var zIn = new ZLibStream(
+                        new MemoryStream(dec, 4, dec.Length - 4),
+                        CompressionMode.Decompress);
+                    using var ms = new MemoryStream();
+                    zIn.CopyTo(ms);
+                    payload = ms.ToArray();
+                }
+                catch (Exception ex) { return result.Fail($"Decompression failed: {ex.Message}"); }
+
+                Log($"  Payload: {payload.Length} bytes");
+
+                var resolvedSetup = ResolveSetupPatchOffsets(payload);
+                if (resolvedSetup == null)
+                    return result.Fail("Could not identify activation patch locations in payload - unsupported version?");
+
+                var (patchedPayload, plApplied, plSkipped, plErrors) = ApplyPatches(payload, resolvedSetup);
+                if (plErrors.Count > 0)
+                {
+                    foreach (var err in plErrors) Log(err);
+                    return result.Fail("Byte mismatch in payload - wrong version?");
+                }
+
+                if (plApplied > 0)
+                {
+                    ReEncryptAndWrite(cachePath, patchedPayload, iv);
+                    Log($"  {plApplied} patch(es) applied" + (plSkipped > 0 ? $", {plSkipped} already done" : ""));
+                }
+                else
+                {
+                    Log("  Already patched");
+                }
+                result.CachePatched = true;
+
+                result.Succeeded = true;
+                Log("Done.");
+            }
+            catch (Exception ex)
+            {
+                result.Fail($"Unexpected error: {ex.Message}");
+                Log($"Error: {ex.Message}");
+            }
+
+            return result;
+        }
+
         public PatchResult Apply()
         {
             _verbose = true;
@@ -151,8 +319,7 @@ namespace CloudFix
                 var cachePath = Fingerprint.FindCachePath(_steamPath);
                 if (cachePath == null)
                 {
-                    Log("Payload cache not found. Will only patch DLL.");
-                    Log("Run again after SteamTools downloads it.");
+                    Log("Payload cache not found. Run offline setup first, or wait for SteamTools to download it.");
                     result.Succeeded = true;
                     return result;
                 }
@@ -286,6 +453,36 @@ namespace CloudFix
         void Log(string msg)
         {
             if (_verbose) Program.PrintLine(msg);
+        }
+
+        string DeployEmbeddedPayload()
+        {
+            try
+            {
+                var cachePath = Fingerprint.GetExpectedCachePath(_steamPath);
+                var dir = Path.GetDirectoryName(cachePath);
+                if (!Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+
+                using var stream = typeof(Patcher).Assembly
+                    .GetManifestResourceStream("payload.cache");
+                if (stream == null)
+                {
+                    Log("  Embedded payload not found in assembly");
+                    return null;
+                }
+
+                using var fs = new FileStream(cachePath, FileMode.Create, FileAccess.Write);
+                stream.CopyTo(fs);
+
+                Log($"  Deployed to {cachePath}");
+                return cachePath;
+            }
+            catch (Exception ex)
+            {
+                Log($"  Deploy failed: {ex.Message}");
+                return null;
+            }
         }
 
         void Backup(string path)
@@ -485,33 +682,41 @@ namespace CloudFix
             };
         }
 
-        PatchEntry[] ResolvePayloadPatchOffsets(byte[] payload)
+        bool ResolvePayloadSections(byte[] payload, out int tStart, out int tEnd, out int gStart, out int gEnd)
         {
+            tStart = tEnd = gStart = gEnd = 0;
             var sections = PeSection.Parse(payload);
             var textSec = PeSection.Find(sections, ".text");
 
             // obfuscated section has a random name each build - find by excluding standard ones
             var knownNames = new HashSet<string> { ".text", ".rdata", ".data", ".pdata", ".fptable", ".rsrc", ".reloc" };
-            PeSection? gcjSec = null;
+            PeSection? obfSec = null;
             foreach (var sec in sections)
             {
                 if (!knownNames.Contains(sec.Name))
                 {
-                    gcjSec = sec;
+                    obfSec = sec;
                     break;
                 }
             }
 
-            if (textSec == null || gcjSec == null)
+            if (textSec == null || obfSec == null)
             {
                 Log("  Payload: missing expected sections");
-                return null;
+                return false;
             }
 
-            int tStart = textSec.Value.RawOffset;
-            int tEnd = tStart + textSec.Value.RawSize;
-            int gStart = gcjSec.Value.RawOffset;
-            int gEnd = gStart + gcjSec.Value.RawSize;
+            tStart = textSec.Value.RawOffset;
+            tEnd = tStart + textSec.Value.RawSize;
+            gStart = obfSec.Value.RawOffset;
+            gEnd = gStart + obfSec.Value.RawSize;
+            return true;
+        }
+
+        PatchEntry[] ResolvePayloadPatchOffsets(byte[] payload)
+        {
+            if (!ResolvePayloadSections(payload, out int tStart, out int tEnd, out int gStart, out int gEnd))
+                return null;
 
             int p1 = TryHardcodedOrScan(payload, PayloadPatches[0].Offset,
                 PayloadPatches[0].Original, PayloadPatches[0].Replacement,
@@ -546,6 +751,37 @@ namespace CloudFix
                 SnapshotPatch(payload, p1, PayloadPatches[0], 2),
                 SnapshotPatch(payload, p2, PayloadPatches[1], 0),
                 SnapshotPatch(payload, p3, PayloadPatches[2], 0),
+            };
+        }
+
+        PatchEntry[] ResolveSetupPatchOffsets(byte[] payload)
+        {
+            if (!ResolvePayloadSections(payload, out int tStart, out int tEnd, out int gStart, out int gEnd))
+                return null;
+
+            int p4 = TryHardcodedOrScan(payload, PayloadPatches[3].Offset,
+                PayloadPatches[3].Original, PayloadPatches[3].Replacement,
+                () => Signatures.FindPayloadPatch4(payload, gStart, gEnd));
+            if (p4 < 0)
+            {
+                Log("  Payload: could not locate activation flag patch");
+                return null;
+            }
+
+            int p5 = TryHardcodedOrScan(payload, PayloadPatches[4].Offset,
+                PayloadPatches[4].Original, PayloadPatches[4].Replacement,
+                () => Signatures.FindPayloadPatch5(payload, tStart, tEnd));
+            if (p5 < 0)
+            {
+                Log("  Payload: could not locate GetCookie retry patch");
+                return null;
+            }
+
+            Log($"  Setup patches at 0x{p4:X}, 0x{p5:X}");
+            return new PatchEntry[]
+            {
+                SnapshotPatch(payload, p4, PayloadPatches[3], 6),
+                SnapshotPatch(payload, p5, PayloadPatches[4], 0),
             };
         }
     }

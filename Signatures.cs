@@ -154,5 +154,71 @@ namespace CloudFix
 
             return -1;
         }
+
+        // Activation flag: two mov cs:byte_xxx, imm8 instructions (C6 05 xx xx FE FF 01/00)
+        // separated by E9 00 00 00 00 E9 ?? ?? 00 00 bridge, both targeting same global.
+        // Returns offset of the second instruction (the fail path that sets 0).
+        public static int FindPayloadPatch4(byte[] data, int gStart, int gEnd)
+        {
+            for (int i = gStart; i < gEnd - 24; i++)
+            {
+                // success: C6 05 ?? ?? FE FF 01
+                if (data[i] != 0xC6 || data[i + 1] != 0x05) continue;
+                if (data[i + 4] != 0xFE || data[i + 5] != 0xFF) continue;
+                if (data[i + 6] != 0x01) continue;
+
+                // bridge: E9 00 00 00 00 (nop jmp) then E9 ?? ?? 00 00 (skip jmp)
+                int b = i + 7;
+                if (b + 10 + 7 > gEnd) continue;
+                if (data[b] != 0xE9 || data[b + 1] != 0x00 || data[b + 2] != 0x00 ||
+                    data[b + 3] != 0x00 || data[b + 4] != 0x00) continue;
+                if (data[b + 5] != 0xE9) continue;
+                if (data[b + 8] != 0x00 || data[b + 9] != 0x00) continue;
+
+                // fail: C6 05 ?? ?? FE FF [00|01]
+                int failOff = b + 10;
+                if (data[failOff] != 0xC6 || data[failOff + 1] != 0x05) continue;
+                if (data[failOff + 4] != 0xFE || data[failOff + 5] != 0xFF) continue;
+                if (data[failOff + 6] != 0x00 && data[failOff + 6] != 0x01) continue;
+
+                return failOff;
+            }
+            return -1;
+        }
+
+        // GetCookie retry skip: 48 85 F6 (test rsi,rsi) followed by 75/EB xx (jnz/jmp short)
+        // preceded by a call (E8 xx xx xx xx) to the cookie cleanup func.
+        // Returns offset of the 75/EB byte.
+        public static int FindPayloadPatch5(byte[] data, int tStart, int tEnd)
+        {
+            // pattern: E8 ?? ?? ?? ?? 48 85 F6 [75|EB]
+            // we also verify the lea rcx,[rsp+??] follows shortly after the jump target
+            for (int i = tStart; i < tEnd - 12; i++)
+            {
+                if (data[i] != 0xE8) continue;
+                if (data[i + 5] != 0x48 || data[i + 6] != 0x85 || data[i + 7] != 0xF6) continue;
+                if (data[i + 8] != 0x75 && data[i + 8] != 0xEB) continue;
+
+                // verify a jmp back to a loop exists within the skip range (sleep + retry)
+                int skipDist = data[i + 9];
+                int afterSkip = i + 10 + skipDist;
+                if (afterSkip > tEnd) continue;
+
+                // look for a backwards jmp (E9 with negative offset) in the skip region
+                bool hasLoop = false;
+                for (int j = i + 10; j < afterSkip && j < tEnd - 5; j++)
+                {
+                    if (data[j] == 0xE9)
+                    {
+                        int rel = BitConverter.ToInt32(data, j + 1);
+                        if (rel < 0) { hasLoop = true; break; }
+                    }
+                }
+                if (!hasLoop) continue;
+
+                return i + 8;
+            }
+            return -1;
+        }
     }
 }
