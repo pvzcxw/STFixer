@@ -1,0 +1,143 @@
+name: Check SteamTools Update
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    # Allow manual trigger
+
+jobs:
+  check-update:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download from SteamTools CDN
+        id: download
+        run: |
+          # Try primary endpoint first, fallback to secondary
+          ENDPOINTS=(
+            "https://update.aaasn.com/version"
+            "https://update.tnkjmec.com/version"
+            "http://update.wudrm.com/version"
+          )
+          
+          DOWNLOADED=false
+          for URL in "${ENDPOINTS[@]}"; do
+            echo "Trying $URL..."
+            if curl -sS --max-time 30 -o payload_response.bin "$URL" 2>/dev/null; then
+              if [ -s payload_response.bin ]; then
+                DOWNLOADED=true
+                echo "Success: $URL"
+                echo "endpoint=$URL" >> $GITHUB_OUTPUT
+                break
+              fi
+            fi
+            echo "Failed: $URL"
+          done
+          
+          if [ "$DOWNLOADED" = false ]; then
+            echo "All endpoints failed"
+            echo "status=endpoints_down" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Calculate hash
+          HASH=$(sha256sum payload_response.bin | cut -d' ' -f1)
+          SIZE=$(stat -c%s payload_response.bin 2>/dev/null || stat -f%z payload_response.bin)
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          echo "size=$SIZE" >> $GITHUB_OUTPUT
+          echo "status=ok" >> $GITHUB_OUTPUT
+          echo "Downloaded $SIZE bytes, hash: $HASH"
+
+      - name: Compare with baseline
+        id: compare
+        if: steps.download.outputs.status == 'ok'
+        run: |
+          CURRENT_HASH="${{ steps.download.outputs.hash }}"
+          BASELINE_FILE=".steamtools-baseline"
+          
+          if [ -f "$BASELINE_FILE" ]; then
+            BASELINE_HASH=$(cat "$BASELINE_FILE")
+            echo "Baseline hash: $BASELINE_HASH"
+            echo "Current hash:  $CURRENT_HASH"
+            
+            if [ "$CURRENT_HASH" = "$BASELINE_HASH" ]; then
+              echo "No change detected"
+              echo "changed=false" >> $GITHUB_OUTPUT
+            else
+              echo "CHANGE DETECTED!"
+              echo "changed=true" >> $GITHUB_OUTPUT
+              echo "old_hash=$BASELINE_HASH" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "No baseline file found - first run?"
+            echo "changed=first_run" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create issue on change
+        if: steps.compare.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'SteamTools Update Detected';
+            const body = `## SteamTools Update Detected
+            
+            The SteamTools payload has changed. CloudFix patches may need updating.
+            
+            **Details:**
+            - **Detected at:** ${new Date().toISOString()}
+            - **Endpoint:** ${{ steps.download.outputs.endpoint }}
+            - **New hash:** \`${{ steps.download.outputs.hash }}\`
+            - **Old hash:** \`${{ steps.compare.outputs.old_hash }}\`
+            - **Response size:** ${{ steps.download.outputs.size }} bytes
+            
+            **Action required:**
+            1. Download the new payload and analyze changes
+            2. Update patch offsets in \`Patcher.cs\` if needed
+            3. Update signature patterns in \`Signatures.cs\` if needed
+            4. Test patches against the new version
+            5. Update the baseline hash once patches are confirmed working
+            
+            ---
+            *This issue was automatically created by the SteamTools update monitor.*`;
+            
+            // Check if an open issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'steamtools-update'
+            });
+            
+            if (issues.data.length > 0) {
+              // Add comment to existing issue
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues.data[0].number,
+                body: `**Update:** Another change detected at ${new Date().toISOString()}\n\nNew hash: \`${{ steps.download.outputs.hash }}\``
+              });
+              console.log(`Added comment to existing issue #${issues.data[0].number}`);
+            } else {
+              // Create new issue
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['steamtools-update', 'needs-attention']
+              });
+              console.log(`Created issue #${issue.data.number}`);
+            }
+
+      - name: Log endpoints down
+        if: steps.download.outputs.status == 'endpoints_down'
+        run: |
+          echo "::warning::All SteamTools CDN endpoints are unreachable"
