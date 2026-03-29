@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="payload.cache" LogicalName="payload.cache" />
+    <EmbeddedResource Include="Stella\stella_fallback.dll" LogicalName="stella_fallback.dll" />
     <Compile Remove="ExtractTool\**" />
   </ItemGroup>
 
