@@ -10,6 +10,8 @@ SteamTools messes with Steam Cloud requests to "fix" Steam Cloud for non-owned g
 
 This tool fixes this behavior by disabling the SteamTools cloud "fix" and instead allowing Steam Cloud saving to fail to sync, as it should. You can backup your saves yourself, right? Beats having to grab a fix for each game in order to save.
 
+This tool has evolved over time to incorporate many more patches for SteamTools behaviors.
+
 ## Usage
 
 1. Download `CloudFix.exe` from the [latest release](https://github.com/Selectively11/CloudFix/releases/latest)
