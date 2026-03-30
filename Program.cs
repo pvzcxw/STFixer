@@ -184,7 +184,7 @@ namespace CloudFix
                         Console.WriteLine();
                         if (applyResult.Succeeded)
                         {
-                            PrintGreen("Cloud Fix: enabled");
+                            PrintGreen("Capcom Game Save Fix: enabled");
                             if (!OfferSteamRestart())
                                 WaitForKey();
                         }
@@ -311,11 +311,11 @@ namespace CloudFix
             };
 
             if (cloudState == PatchState.Patched)
-                PrintGreen($"Cloud Fix:  {cloudLabel}");
+                PrintGreen($"Capcom Game Save Fix:  {cloudLabel}");
             else if (cloudState == PatchState.OutOfDate)
-                PrintYellow($"Cloud Fix:  {cloudLabel}");
+                PrintYellow($"Capcom Game Save Fix:  {cloudLabel}");
             else
-                PrintRed($"Cloud Fix:  {cloudLabel}");
+                PrintRed($"Capcom Game Save Fix:  {cloudLabel}");
 
             if (cloudState == PatchState.NotInstalled)
             {
