@@ -590,7 +590,13 @@ namespace CloudFix
 
         public bool NeedsDllRepair()
         {
-            return FindCoreDll() == null;
+            foreach (var name in HijackCandidates)
+            {
+                var path = Path.Combine(_steamPath, name);
+                if (!File.Exists(path))
+                    return true;
+            }
+            return false;
         }
 
         // SteamTools.exe deploys Core.dll -> xinput1_4.dll on every startup,
@@ -742,6 +748,25 @@ namespace CloudFix
                 foreach (var (name, url, fallback, hash) in targets)
                 {
                     var destPath = Path.Combine(_steamPath, name);
+
+                    // skip if already present with correct hash
+                    if (File.Exists(destPath))
+                    {
+                        try
+                        {
+                            var existing = ReadFileShared(destPath);
+                            if (ComputeSha256(existing) == hash)
+                            {
+                                Log($"  {name}: already present, hash OK");
+                                continue;
+                            }
+                            Log($"  {name}: present but hash mismatch, re-downloading..");
+                        }
+                        catch (IOException)
+                        {
+                            Log($"  {name}: could not read existing file, re-downloading..");
+                        }
+                    }
 
                     byte[] data = null;
                     bool fromFallback = false;
