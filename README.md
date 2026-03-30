@@ -1,6 +1,6 @@
 # STFixer (aka CloudFix)
 
-Originally just a fix for the 'broken Capcom game saves' problem that is caused by SteamTools jank. Now it does that, but also a lot of other things too!
+Originally just a fix for the 'broken Capcom game saves' problem that is caused by SteamTools silliness . Now it does that and also a lot of other things too!
 
 > Please disable Steam Cloud for non-owned games in their Steam properties. Manually backup your saves for all non-owned games!
 
