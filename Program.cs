@@ -103,14 +103,17 @@ namespace CloudFix
                 RunDiagnostics(patcher);
                 PrintSep();
                 Console.WriteLine();
-                Console.WriteLine("  1. Setup SteamTools offline");
-                Console.WriteLine("  2. Enable  (patch cloud saves)");
-                Console.WriteLine("  3. Disable (restore originals)");
-                Console.WriteLine("  4. Enable Morrenus fallback");
-                Console.WriteLine("  5. Test Morrenus API");
-                Console.WriteLine("  6. Update API key");
-                Console.WriteLine("  7. Repair SteamTools DLLs");
-                Console.WriteLine("  8. Exit");
+                PrintMenuItem("1. Setup SteamTools Offline", "makes new SteamTools installations work if servers are down");
+                PrintMenuItem("2. Capcom Game Save Fix", "fixes games that will not create saves");
+                PrintMenuItem("3. This space intentionally left blank", null);
+                var fallbackColor = patcher.GetFallbackPatchState() == PatchState.Patched
+                    ? ConsoleColor.White : ConsoleColor.Cyan;
+                PrintMenuItem("4. Enable Morrenus fallback", "fixes \"No Internet Connection\" error", fallbackColor);
+                PrintMenuItem("5. Test Morrenus API", "checks if your ISP is blocking the API/if your API key is bad");
+                PrintMenuItem("6. Update Morrenus API key", "update your expired API key here");
+                PrintMenuItem("7. Repair SteamTools DLLs", "checks for the core SteamTools DLLs and replaces missing DLLs");
+                PrintMenuItem("8. Disable Everything", "restore original files");
+                PrintMenuItem("9. Exit", null);
                 Console.WriteLine();
                 Console.Write("  > ");
 
@@ -126,6 +129,17 @@ namespace CloudFix
                         PrintLine($"Steam: {_steamPath}");
                         PrintSep();
                         Console.WriteLine();
+                        PrintLine("SteamTools requires a connection to their server during first");
+                        PrintLine("time setup. This can be a problem if the server is down.");
+                        PrintLine("This option patches that so that SteamTools will work, even");
+                        PrintLine("if the server is down.");
+                        Console.WriteLine();
+                        Console.Write("  Continue? [Y/n] ");
+                        var offlineConfirm = Console.ReadKey(true);
+                        Console.WriteLine(offlineConfirm.KeyChar);
+                        Console.WriteLine();
+                        if (offlineConfirm.KeyChar is 'n' or 'N')
+                            break;
                         var setupResult = patcher.ApplyOfflineSetup();
                         if (!setupResult.Succeeded && patcher.NeedsDllRepair() && OfferDllRepair(patcher))
                             setupResult = patcher.ApplyOfflineSetup();
@@ -149,6 +163,21 @@ namespace CloudFix
                         PrintLine($"Steam: {_steamPath}");
                         PrintSep();
                         Console.WriteLine();
+                        PrintLine("SteamTools messes with Steam Cloud. The purpose of this was to");
+                        PrintLine("make Steam Cloud 'work' for non-owned games. Valve has since");
+                        PrintLine("patched this, so Steam Cloud doesn't work for non-owned games.");
+                        PrintLine("The consequence of SteamTools's messing with Steam Cloud is");
+                        PrintLine("that Capcom games will not save at all. They won't be able to");
+                        PrintLine("create a save.");
+                        Console.WriteLine();
+                        PrintLine("This patch fixes that. Capcom games will save.");
+                        Console.WriteLine();
+                        Console.Write("  Continue? [Y/n] ");
+                        var cloudConfirm = Console.ReadKey(true);
+                        Console.WriteLine(cloudConfirm.KeyChar);
+                        Console.WriteLine();
+                        if (cloudConfirm.KeyChar is 'n' or 'N')
+                            break;
                         var applyResult = patcher.Apply();
                         if (!applyResult.Succeeded && patcher.NeedsDllRepair() && OfferDllRepair(patcher))
                             applyResult = patcher.Apply();
@@ -167,24 +196,6 @@ namespace CloudFix
                         break;
 
                     case '3':
-                        ClearScreen();
-                        PrintHeader();
-                        PrintLine($"Steam: {_steamPath}");
-                        PrintSep();
-                        Console.WriteLine();
-                        var restoreResult = patcher.Restore();
-                        Console.WriteLine();
-                        if (restoreResult.Succeeded)
-                        {
-                            PrintRed("Cloud Fix: disabled");
-                            if (!OfferSteamRestart())
-                                WaitForKey();
-                        }
-                        else
-                        {
-                            PrintRed($"Error: {restoreResult.Error}");
-                            WaitForKey();
-                        }
                         break;
 
                     case '4':
@@ -193,6 +204,16 @@ namespace CloudFix
                         PrintLine($"Steam: {_steamPath}");
                         PrintSep();
                         Console.WriteLine();
+                        PrintLine("If a specific SteamTools service is down, manifests cannot be");
+                        PrintLine("retrieved for games that are not owned. A user experiences this");
+                        PrintLine("as a 'No Internet Connection' error in Steam. This fixes that.");
+                        Console.WriteLine();
+                        Console.Write("  Continue? [Y/n] ");
+                        var fallbackConfirm = Console.ReadKey(true);
+                        Console.WriteLine(fallbackConfirm.KeyChar);
+                        Console.WriteLine();
+                        if (fallbackConfirm.KeyChar is 'n' or 'N')
+                            break;
                         RunFallbackSetup(patcher);
                         break;
 
@@ -224,6 +245,34 @@ namespace CloudFix
                         break;
 
                     case '8':
+                        ClearScreen();
+                        PrintHeader();
+                        PrintLine($"Steam: {_steamPath}");
+                        PrintSep();
+                        Console.WriteLine();
+                        PrintYellow("This will undo all the patches/modifications made by this tool.");
+                        Console.Write("  Are you sure you want to do this? [y/N] ");
+                        var restoreConfirm = Console.ReadKey(true);
+                        Console.WriteLine(restoreConfirm.KeyChar);
+                        Console.WriteLine();
+                        if (restoreConfirm.KeyChar is not ('y' or 'Y'))
+                            break;
+                        var restoreResult = patcher.Restore();
+                        Console.WriteLine();
+                        if (restoreResult.Succeeded)
+                        {
+                            PrintRed("All patches removed");
+                            if (!OfferSteamRestart())
+                                WaitForKey();
+                        }
+                        else
+                        {
+                            PrintRed($"Error: {restoreResult.Error}");
+                            WaitForKey();
+                        }
+                        break;
+
+                    case '9':
                         return;
                 }
             }
@@ -325,6 +374,19 @@ namespace CloudFix
                     PrintYellow("SteamTools Desktop App will overwrite Morrenus fallback every time");
                     PrintYellow("you launch the desktop app unless you run option 4 and patch it!");
                 }
+            }
+
+            bool allGood = cloudState == PatchState.Patched
+                && offlineState == PatchState.Patched
+                && fallbackState == PatchState.Patched
+                && patcher.IsStellaDllCurrent()
+                && stState <= 0;
+
+            if (allGood)
+            {
+                Console.WriteLine();
+                PrintGreen("Everything is configured correctly!");
+                PrintGreen("Test API or update API key if you are having any issues.");
             }
         }
 
@@ -841,6 +903,19 @@ namespace CloudFix
             Console.ForegroundColor = ConsoleColor.Yellow;
             Console.WriteLine($"  {msg}");
             Console.ResetColor();
+        }
+
+        static void PrintMenuItem(string name, string description, ConsoleColor nameColor = ConsoleColor.White, ConsoleColor descColor = ConsoleColor.DarkCyan)
+        {
+            Console.ForegroundColor = nameColor;
+            Console.Write($"  {name}");
+            if (description != null)
+            {
+                Console.ForegroundColor = descColor;
+                Console.Write($" - {description}");
+            }
+            Console.ResetColor();
+            Console.WriteLine();
         }
     }
 }

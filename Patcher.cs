@@ -511,6 +511,8 @@ namespace CloudFix
                 if (restored > 0)
                 {
                     CleanupStellaFiles();
+                    if (GetSteamToolsExePatchState() == 0)
+                        UnpatchSteamToolsExe();
                     Log($"Restored {restored} file(s).");
                     result.Succeeded = true;
                 }
@@ -671,6 +673,42 @@ namespace CloudFix
                 data[StExePatchOffset + 1] = StExePatched[1];
                 File.WriteAllBytes(exe, data);
                 Log("  SteamTools.exe: patched (DLL deploy disabled)");
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Log("  SteamTools.exe: access denied - run as administrator");
+                return false;
+            }
+            catch (IOException ex)
+            {
+                Log($"  SteamTools.exe: {ex.Message}");
+                return false;
+            }
+        }
+
+        public bool UnpatchSteamToolsExe()
+        {
+            var exe = FindSteamToolsExe();
+            if (exe == null) return false;
+
+            try
+            {
+                var data = ReadFileShared(exe);
+                if (data.Length < StExePatchOffset + 2) return false;
+
+                if (data[StExePatchOffset] == StExeOriginal[0]
+                    && data[StExePatchOffset + 1] == StExeOriginal[1])
+                    return true; // already original
+
+                if (data[StExePatchOffset] != StExePatched[0]
+                    || data[StExePatchOffset + 1] != StExePatched[1])
+                    return false; // unknown bytes
+
+                data[StExePatchOffset] = StExeOriginal[0];
+                data[StExePatchOffset + 1] = StExeOriginal[1];
+                File.WriteAllBytes(exe, data);
+                Log("  SteamTools.exe: restored to original");
                 return true;
             }
             catch (UnauthorizedAccessException)
