@@ -96,7 +96,7 @@ namespace CloudFix
         bool _verbose;
 
         byte[] _cachedPayload;
-        long _cachedPayloadTicks;
+        long _cachedPayloadSize;
 
         public Patcher(string steamPath)
         {
@@ -116,8 +116,8 @@ namespace CloudFix
             var info = new FileInfo(cachePath);
             if (!info.Exists) return null;
 
-            long ticks = info.LastWriteTimeUtc.Ticks;
-            if (_cachedPayload != null && _cachedPayloadTicks == ticks)
+            long size = info.Length;
+            if (_cachedPayload != null && _cachedPayloadSize == size)
                 return _cachedPayload;
 
             byte[] raw;
@@ -142,7 +142,7 @@ namespace CloudFix
                 using var ms = new MemoryStream();
                 zIn.CopyTo(ms);
                 _cachedPayload = ms.ToArray();
-                _cachedPayloadTicks = ticks;
+                _cachedPayloadSize = size;
                 return _cachedPayload;
             }
             catch { return null; }
