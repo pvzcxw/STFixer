@@ -115,6 +115,11 @@ namespace CloudFix
                 await File.WriteAllBytesAsync(tempPath, data);
 
                 var currentExe = Environment.ProcessPath;
+                if (string.IsNullOrEmpty(currentExe))
+                {
+                    Program.PrintLine("Error: could not determine current executable path");
+                    return;
+                }
                 var backupPath = currentExe + ".old";
 
                 Program.PrintLine("Installing update..");
@@ -135,6 +140,7 @@ namespace CloudFix
 
                 Program.PrintLine("Updated. Relaunching..");
                 Process.Start(new ProcessStartInfo(currentExe) { UseShellExecute = true });
+                Environment.Exit(0);
             }
             finally
             {
