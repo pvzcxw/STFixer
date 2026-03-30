@@ -273,7 +273,12 @@ namespace CloudFix
                         break;
 
                     case '9':
-                        return;
+                        Console.Write("  Are you sure you want to exit? [Y/n] ");
+                        var exitConfirm = Console.ReadKey(true);
+                        Console.WriteLine(exitConfirm.KeyChar);
+                        if (exitConfirm.KeyChar is not ('n' or 'N'))
+                            return;
+                        break;
                 }
             }
         }
@@ -502,11 +507,15 @@ namespace CloudFix
 
             Console.WriteLine("  1. Test with Grind Survivors");
             Console.WriteLine("  2. Specify depot + manifest ID");
+            Console.WriteLine("  3. Return to main menu");
             Console.WriteLine();
             Console.Write("  > ");
             var testChoice = Console.ReadKey(true);
             Console.WriteLine(testChoice.KeyChar);
             Console.WriteLine();
+
+            if (testChoice.KeyChar == '3')
+                return;
 
             if (testChoice.KeyChar == '1')
             {
@@ -905,7 +914,7 @@ namespace CloudFix
             Console.ResetColor();
         }
 
-        static void PrintMenuItem(string name, string description, ConsoleColor nameColor = ConsoleColor.White, ConsoleColor descColor = ConsoleColor.DarkCyan)
+        static void PrintMenuItem(string name, string description, ConsoleColor nameColor = ConsoleColor.White, ConsoleColor descColor = ConsoleColor.Green)
         {
             Console.ForegroundColor = nameColor;
             Console.Write($"  {name}");
