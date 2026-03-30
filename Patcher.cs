@@ -1046,6 +1046,7 @@ namespace CloudFix
             iv.CopyTo(output, 0);
             newCt.CopyTo(output, 16);
             File.WriteAllBytes(cachePath, output);
+            _cachedPayload = null;
         }
 
         static string ReadAsciiZ(byte[] data, int offset)
