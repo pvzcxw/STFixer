@@ -820,6 +820,28 @@ namespace CloudFix
 
             try
             {
+                // core DLL patches must be applied first - the hash check bypass
+                // is required or the DLL will reject our modified payload
+                var hijackDll = FindCoreDll();
+                if (hijackDll == null)
+                    return result.Fail("SteamTools Core DLL not found. Is SteamTools installed?");
+
+                var dllPath = Path.Combine(_steamPath, hijackDll);
+                byte[] dllData;
+                try { dllData = ReadFileShared(dllPath); }
+                catch (IOException) { return result.Fail($"{hijackDll} is in use - close Steam first"); }
+
+                var resolvedCore = ResolveCorePatchOffsets(dllData);
+                if (resolvedCore == null)
+                    return result.Fail($"Could not identify patch locations in {hijackDll} - unsupported version?");
+
+                var (patchedDll, dllApplied, dllSkipped, dllErrors) = ApplyPatches(dllData, resolvedCore);
+                if (dllErrors.Count > 0)
+                {
+                    foreach (var err in dllErrors) Log(err);
+                    return result.Fail("Byte mismatch in " + hijackDll + " - wrong version?");
+                }
+
                 var cachePath = Fingerprint.FindCachePath(_steamPath);
                 if (cachePath == null)
                 {
@@ -856,6 +878,15 @@ namespace CloudFix
                 var stellaErr = DeployStella(apiKey);
                 if (stellaErr != null)
                     return result.Fail(stellaErr);
+
+                // write core DLL patches (hash check bypass)
+                Backup(dllPath);
+                if (dllApplied > 0)
+                {
+                    File.WriteAllBytes(dllPath, patchedDll);
+                    Log($"  {dllApplied} core patch(es) applied to {hijackDll}");
+                }
+                result.DllPatched = true;
 
                 if (plApplied > 0 || !caveAlready)
                 {
