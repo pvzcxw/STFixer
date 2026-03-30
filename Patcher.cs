@@ -582,7 +582,7 @@ namespace CloudFix
             if (deployedBytes.Length != embedded.Length)
                 return false;
 
-            return ComputeSha256(deployedBytes) == ComputeSha256(embedded);
+            return deployedBytes.AsSpan().SequenceEqual(embedded);
         }
 
         public bool NeedsDllRepair()
@@ -906,7 +906,7 @@ namespace CloudFix
 
             var blob = new byte[4 + compMs.Length];
             BitConverter.TryWriteBytes(blob.AsSpan(0, 4), patchedPayload.Length);
-            compMs.ToArray().CopyTo(blob, 4);
+            compMs.GetBuffer().AsSpan(0, (int)compMs.Length).CopyTo(blob.AsSpan(4));
 
             var newCt = AesCbcEncrypt(blob, AesKey, iv);
             var output = new byte[16 + newCt.Length];

@@ -98,11 +98,21 @@ namespace CloudFix
             var tempPath = Path.Combine(Path.GetTempPath(), $"CloudFix_{Guid.NewGuid():N}.exe");
             try
             {
-                using (var stream = await _http.GetStreamAsync(exeAsset.DownloadUrl))
-                using (var fs = File.Create(tempPath))
+                var data = await _http.GetByteArrayAsync(exeAsset.DownloadUrl);
+
+                if (data.Length < 1024 * 1024 || data.Length > 100 * 1024 * 1024)
                 {
-                    await stream.CopyToAsync(fs);
+                    Program.PrintLine($"Error: downloaded file has suspicious size ({data.Length} bytes)");
+                    return;
                 }
+
+                if (data[0] != 'M' || data[1] != 'Z')
+                {
+                    Program.PrintLine("Error: downloaded file is not a valid executable");
+                    return;
+                }
+
+                await File.WriteAllBytesAsync(tempPath, data);
 
                 var currentExe = Environment.ProcessPath;
                 var backupPath = currentExe + ".old";

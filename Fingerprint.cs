@@ -99,6 +99,10 @@ namespace CloudFix
         [return: MarshalAs(UnmanagedType.Bool)]
         static extern bool VirtualFree(IntPtr addr, UIntPtr size, uint type);
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool VirtualProtect(IntPtr addr, UIntPtr size, uint newProtect, out uint oldProtect);
+
         static unsafe void CpuId(uint leaf, out uint eax, out uint ebx, out uint ecx, out uint edx)
         {
             // x64 shellcode for cpuid instruction
@@ -109,12 +113,15 @@ namespace CloudFix
                 0x08, 0x41, 0x89, 0x50, 0x0C, 0x5B, 0xC3
             };
 
-            var mem = VirtualAlloc(IntPtr.Zero, (UIntPtr)code.Length, 0x3000, 0x40);
+            var mem = VirtualAlloc(IntPtr.Zero, (UIntPtr)code.Length, 0x3000, 0x04); // PAGE_READWRITE
             if (mem == IntPtr.Zero) throw new InvalidOperationException("VirtualAlloc failed");
 
             try
             {
                 Marshal.Copy(code.ToArray(), 0, mem, code.Length);
+
+                if (!VirtualProtect(mem, (UIntPtr)code.Length, 0x20, out _)) // PAGE_EXECUTE_READ
+                    throw new InvalidOperationException("VirtualProtect failed");
                 var regs = stackalloc uint[4];
 
                 var fn = (delegate* unmanaged[Cdecl]<uint, uint*, void>)mem;
