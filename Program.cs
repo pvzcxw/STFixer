@@ -26,10 +26,11 @@ namespace CloudFix
         }
 
         static string _steamPath;
+        static ApiKeyStatus? _apiKeyStatus;
 
         static void Main(string[] args)
         {
-            try { Console.Title = "STFixer"; } catch { }
+            try { Console.Title = $"STFixer v{_version}"; } catch { }
             ClearScreen();
             PrintHeader();
 
@@ -93,6 +94,7 @@ namespace CloudFix
             PrintSep();
 
             var patcher = new Patcher(_steamPath);
+            _apiKeyStatus = CheckApiKeyStatus();
 
             while (true)
             {
@@ -215,6 +217,7 @@ namespace CloudFix
                         if (fallbackConfirm.KeyChar is 'n' or 'N')
                             break;
                         RunFallbackSetup(patcher);
+                        _apiKeyStatus = CheckApiKeyStatus();
                         break;
 
                     case '5':
@@ -233,6 +236,7 @@ namespace CloudFix
                         PrintSep();
                         Console.WriteLine();
                         RunUpdateApiKey();
+                        _apiKeyStatus = CheckApiKeyStatus();
                         break;
 
                     case '7':
@@ -298,6 +302,27 @@ namespace CloudFix
 
         static void RunDiagnosticsInner(Patcher patcher)
         {
+            const long ExpectedVersion = 1773426488;
+            var steamVersion = GetSteamVersion();
+            if (steamVersion != null)
+            {
+                if (steamVersion == ExpectedVersion.ToString())
+                    PrintGreen($"Steam version:         {steamVersion}");
+                else
+                {
+                    PrintRed($"Steam version:         {steamVersion} (unsupported!)");
+                    if (long.TryParse(steamVersion, out var ver) && ver > ExpectedVersion)
+                    {
+                        PrintRed($"Expected version {ExpectedVersion}. You're on a newer version!");
+                        PrintRed("Either wait for an update to this tool or run sm0k3r to downgrade!");
+                    }
+                    else
+                        PrintRed($"Expected version {ExpectedVersion}. Fallback WILL NOT WORK unless you update Steam!");
+                }
+            }
+            else
+                PrintYellow("Steam version:         unknown");
+
             var cloudState = patcher.GetPatchState();
             string cloudLabel = cloudState switch
             {
@@ -390,8 +415,27 @@ namespace CloudFix
             if (allGood)
             {
                 Console.WriteLine();
-                PrintGreen("Everything is configured correctly!");
-                PrintGreen("Test API or update API key if you are having any issues.");
+                if (_apiKeyStatus == null || _apiKeyStatus == ApiKeyStatus.Good || _apiKeyStatus == ApiKeyStatus.NoKey)
+                {
+                    if (_apiKeyStatus == ApiKeyStatus.Good)
+                        PrintGreen("API key is valid and the API is responding correctly!");
+                    Console.WriteLine();
+                    PrintGreen("Everything is configured correctly!");
+                }
+                else if (_apiKeyStatus == ApiKeyStatus.Expired)
+                {
+                    PrintRed("API key:               expired or invalid");
+                    PrintRed("Use option 6 to update your API key.");
+                }
+                else if (_apiKeyStatus == ApiKeyStatus.SslBlocked)
+                {
+                    PrintRed("Your ISP is blocking the API! Turn off Advanced Security in your");
+                    PrintRed("ISP's app if they have that feature. Alternatively, use a VPN.");
+                }
+                else
+                {
+                    PrintYellow("API key:               could not verify (network error)");
+                }
             }
         }
 
@@ -881,6 +925,68 @@ namespace CloudFix
                     p.Dispose();
                 }
             }
+        }
+
+        enum ApiKeyStatus { Good, Expired, SslBlocked, NetworkError, NoKey }
+
+        static ApiKeyStatus CheckApiKeyStatus()
+        {
+            var cfgPath = Path.Combine(_steamPath, "stella.cfg");
+            if (!File.Exists(cfgPath))
+                return ApiKeyStatus.NoKey;
+
+            string apiKey;
+            try { apiKey = File.ReadAllText(cfgPath).Trim(); }
+            catch { return ApiKeyStatus.NoKey; }
+
+            if (string.IsNullOrWhiteSpace(apiKey) || !IsValidApiKey(apiKey))
+                return ApiKeyStatus.NoKey;
+
+            try
+            {
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                var url = $"https://manifest.morrenus.xyz/api/v1/user/stats?api_key={apiKey}";
+                var resp = http.GetAsync(url).GetAwaiter().GetResult();
+
+                if ((int)resp.StatusCode == 401)
+                    return ApiKeyStatus.Expired;
+
+                if (!resp.IsSuccessStatusCode)
+                    return ApiKeyStatus.NetworkError;
+
+                return ApiKeyStatus.Good;
+            }
+            catch (HttpRequestException ex) when (ex.InnerException is System.Security.Authentication.AuthenticationException)
+            {
+                return ApiKeyStatus.SslBlocked;
+            }
+            catch
+            {
+                return ApiKeyStatus.NetworkError;
+            }
+        }
+
+        static string GetSteamVersion()
+        {
+            try
+            {
+                var manifest = Path.Combine(_steamPath, "package", "steam_client_win64.manifest");
+                if (!File.Exists(manifest))
+                    return null;
+                foreach (var line in File.ReadLines(manifest))
+                {
+                    var trimmed = line.Trim();
+                    if (!trimmed.StartsWith("\"version\""))
+                        continue;
+                    // format: "version"		"1773426488"
+                    var last = trimmed.LastIndexOf('"');
+                    var secondLast = trimmed.LastIndexOf('"', last - 1);
+                    if (last > secondLast && secondLast >= 0)
+                        return trimmed[(secondLast + 1)..last];
+                }
+            }
+            catch { }
+            return null;
         }
 
         internal static void PrintSep()
