@@ -4,14 +4,14 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyName>CloudFix</AssemblyName>
+    <AssemblyName>STFixer</AssemblyName>
     <RootNamespace>CloudFix</RootNamespace>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishTrimmed>true</PublishTrimmed>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <Version>0.5.6</Version>
+    <Version>0.5.7</Version>
     <NoWarn>CA1416</NoWarn>
     <ApplicationIcon>steam_logo3.ico</ApplicationIcon>
     <CETCompat>false</CETCompat>

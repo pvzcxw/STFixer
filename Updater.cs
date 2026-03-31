@@ -36,13 +36,13 @@ namespace CloudFix
     internal static class Updater
     {
         const string RepoOwner = "Selectively11";
-        const string RepoName = "CloudFix";
+        const string RepoName = "STFixer";
 
         static readonly HttpClient _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
 
         static Updater()
         {
-            _http.DefaultRequestHeaders.UserAgent.ParseAdd("CloudFix-Updater");
+            _http.DefaultRequestHeaders.UserAgent.ParseAdd("STFixer-Updater");
         }
 
         public static async Task<ReleaseInfo> CheckForUpdate(string currentVersion)
@@ -95,7 +95,7 @@ namespace CloudFix
 
             Program.PrintLine($"Downloading {exeAsset.Name}..");
 
-            var tempPath = Path.Combine(Path.GetTempPath(), $"CloudFix_{Guid.NewGuid():N}.exe");
+                var tempPath = Path.Combine(Path.GetTempPath(), $"STFixer_{Guid.NewGuid():N}.exe");
             try
             {
                 var data = await _http.GetByteArrayAsync(exeAsset.DownloadUrl);
