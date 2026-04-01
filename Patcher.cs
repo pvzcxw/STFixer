@@ -1863,7 +1863,7 @@ namespace CloudFix
             return PatchState.PartiallyPatched;
         }
 
-        string DeployCloudRedirect(uint appId)
+        string DeployCloudRedirect()
         {
             var dllSrc = Path.Combine(AppContext.BaseDirectory, "cloud_redirect.dll");
 
@@ -1881,20 +1881,10 @@ namespace CloudFix
                 return "cloud_redirect.dll is in use (close Steam first)";
             }
 
-            // write config file next to the DLL
-            var cfgDest = Path.Combine(_steamPath, "cloud_redirect.cfg");
-            var cfgContent = $"appid={appId}\nstorage_path=C:\\CloudRedirect\\saves\\\nlog_path=C:\\CloudRedirect\\cloud_redirect.log\n";
-            File.WriteAllText(cfgDest, cfgContent);
-            Log($"  Wrote cloud_redirect.cfg (appid={appId})");
-
-            // ensure storage directory exists
-            try { Directory.CreateDirectory("C:\\CloudRedirect\\saves"); }
-            catch { }
-
             return null;
         }
 
-        public PatchResult ApplyCloudRedirect(uint appId)
+        public PatchResult ApplyCloudRedirect()
         {
             _verbose = true;
             var result = new PatchResult();
@@ -1955,7 +1945,7 @@ namespace CloudFix
                 bool caveAlready = BytesMatch(patchedPayload, resolved.CodeCaveFileOffset,
                     resolved.DynamicCodeCave, 0, resolved.DynamicCodeCave.Length);
 
-                var deployErr = DeployCloudRedirect(appId);
+                var deployErr = DeployCloudRedirect();
                 if (deployErr != null)
                     return result.Fail(deployErr);
 

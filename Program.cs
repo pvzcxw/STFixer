@@ -30,6 +30,13 @@ namespace CloudFix
 
         static void Main(string[] args)
         {
+            // CLI mode: STFixer.exe cloud-redirect [appid]
+            if (args.Length >= 1 && args[0] == "cloud-redirect")
+            {
+                RunCliCloudRedirect(args);
+                return;
+            }
+
             try { Console.Title = $"STFixer v{_version}"; } catch { }
             ClearScreen();
             PrintHeader();
@@ -60,6 +67,7 @@ namespace CloudFix
             }
 
             PrintLine($"Steam: {_steamPath}");
+            GoogleDriveAuth.Init(_steamPath);
 
             // non-blocking update check, don't stall the menu
             try
@@ -102,12 +110,16 @@ namespace CloudFix
                 PrintHeader();
                 PrintLine($"Steam: {_steamPath}");
                 PrintSep();
-                RunDiagnostics(patcher);
+                var driveStatus = GoogleDriveAuth.GetStatus();
+                RunDiagnostics(patcher, driveStatus);
                 PrintSep();
                 Console.WriteLine();
                 PrintMenuItem("1. Setup SteamTools Offline", "makes new SteamTools installations work if servers are down");
                 PrintMenuItem("2. Capcom Game Save Fix", "fixes games that will not create saves");
-                PrintMenuItem("3. Cloud Save Redirect", "redirect cloud saves to local folder for a specific game");
+                var driveColor = driveStatus == GoogleDriveAuth.Status.Authenticated
+                    ? ConsoleColor.White : ConsoleColor.Cyan;
+                string driveDesc = "Makes Steam Cloud work! Steam Cloud for non-owned games is rerouted to Google Drive";
+                PrintMenuItem("3. Cloud Save Redirect", driveDesc, driveColor);
                 var fallbackColor = patcher.GetFallbackPatchState() == PatchState.Patched
                     ? ConsoleColor.White : ConsoleColor.Cyan;
                 PrintMenuItem("4. Enable Morrenus fallback", "fixes \"No Internet Connection\" error", fallbackColor);
@@ -297,11 +309,11 @@ namespace CloudFix
             }
         }
 
-        static void RunDiagnostics(Patcher patcher)
+        static void RunDiagnostics(Patcher patcher, GoogleDriveAuth.Status driveStatus)
         {
             try
             {
-                RunDiagnosticsInner(patcher);
+                RunDiagnosticsInner(patcher, driveStatus);
             }
             catch (Exception ex)
             {
@@ -310,7 +322,7 @@ namespace CloudFix
             }
         }
 
-        static void RunDiagnosticsInner(Patcher patcher)
+        static void RunDiagnosticsInner(Patcher patcher, GoogleDriveAuth.Status driveStatus)
         {
             const long ExpectedVersion = 1773426488;
             var steamVersion = GetSteamVersion();
@@ -404,17 +416,19 @@ namespace CloudFix
             var stState = patcher.GetSteamToolsExePatchState();
             if (stState >= 0)
             {
-                Console.WriteLine();
                 if (stState == 0)
-                    PrintGreen("SteamTools: silent DLL updating is disabled");
+                    PrintGreen("SteamTools DLL update: disabled");
                 else
                 {
-                    PrintYellow("SteamTools: unpatched");
-                    PrintYellow("Fallback is enabled but SteamTools Desktop App is unpatched.");
-                    PrintYellow("SteamTools Desktop App will overwrite Morrenus fallback every time");
-                    PrintYellow("you launch the desktop app unless you run option 4 and patch it!");
+                    PrintYellow("SteamTools DLL update: active (will overwrite patches!)");
+                    PrintYellow("  Run option 4 to patch the SteamTools Desktop App.");
                 }
             }
+
+            if (driveStatus == GoogleDriveAuth.Status.Authenticated)
+                PrintGreen($"Google Drive:          signed in");
+            else
+                PrintLine($"Google Drive:          not configured (use option 3)");
 
             bool allGood = cloudState == PatchState.Patched
                 && offlineState == PatchState.Patched
@@ -449,14 +463,38 @@ namespace CloudFix
             }
         }
 
+        static void RunCliCloudRedirect(string[] args)
+        {
+            var steamPath = DetectSteamPath();
+            if (steamPath == null)
+            {
+                Console.Error.WriteLine("ERROR: Steam path not found");
+                Environment.ExitCode = 1;
+                return;
+            }
+            Console.WriteLine($"Steam: {steamPath}");
+            GoogleDriveAuth.Init(steamPath);
+
+            var patcher = new Patcher(steamPath);
+            Console.WriteLine("Applying CloudRedirect...");
+            var result = patcher.ApplyCloudRedirect();
+            if (result.Succeeded)
+            {
+                Console.WriteLine("SUCCESS - restart Steam for changes to take effect");
+            }
+            else
+            {
+                Console.Error.WriteLine($"FAILED: {result.Error}");
+                Environment.ExitCode = 1;
+            }
+        }
+
         static void RunCloudRedirectSetup(Patcher patcher)
         {
-            PrintLine("Cloud Save Redirect intercepts Steam Cloud RPCs for a single game");
-            PrintLine("and redirects all cloud save operations to a local folder.");
-            PrintLine("This makes cloud saves work for games where SteamTools broke them.");
+            PrintLine("Cloud Save Redirect redirects Steam Cloud requests for non-owned games");
+            PrintLine("to Google Drive. This makes Steam Cloud functionality work!");
             Console.WriteLine();
 
-            // check if cloud_redirect.dll is next to the exe
             var dllPath = Path.Combine(AppContext.BaseDirectory, "cloud_redirect.dll");
             if (!File.Exists(dllPath))
             {
@@ -466,35 +504,47 @@ namespace CloudFix
                 return;
             }
 
-            // check current state
             var state = patcher.GetCloudRedirectPatchState();
             if (state == PatchState.Patched)
             {
                 PrintGreen("CloudRedirect is already active.");
-                Console.Write("  Reconfigure with a different AppID? [y/N] ");
-                var rc = Console.ReadKey(true);
-                Console.WriteLine(rc.KeyChar);
                 Console.WriteLine();
-                if (rc.KeyChar is not ('y' or 'Y'))
+
+                var driveStatus = GoogleDriveAuth.GetStatus();
+                if (driveStatus == GoogleDriveAuth.Status.Authenticated)
+                    PrintGreen("Google Drive: signed in");
+                else
+                    PrintYellow("Google Drive: not configured");
+                Console.WriteLine();
+
+                if (driveStatus == GoogleDriveAuth.Status.Authenticated)
+                    PrintMenuItem("1. Sign out of Google Drive", "remove saved tokens");
+                else
+                    PrintMenuItem("1. Sign in to Google Drive", "sync cloud saves across machines");
+                PrintMenuItem("2. Back to main menu", null);
+                Console.WriteLine();
+                Console.Write("  > ");
+                var sub = Console.ReadKey(true);
+                Console.WriteLine(sub.KeyChar);
+                Console.WriteLine();
+
+                switch (sub.KeyChar)
                 {
-                    WaitForKey();
-                    return;
+                    case '1':
+                        if (driveStatus == GoogleDriveAuth.Status.Authenticated)
+                        {
+                            GoogleDriveAuth.SignOut();
+                            PrintYellow("Signed out. Cloud saves will not sync to Google Drive.");
+                        }
+                        else
+                            RunGoogleDriveSignIn();
+                        WaitForKey();
+                        return;
+                    default:
+                        return;
                 }
             }
 
-            Console.Write("  Enter the game's AppID: ");
-            var input = Console.ReadLine()?.Trim();
-            if (string.IsNullOrWhiteSpace(input) || !uint.TryParse(input, out var appId) || appId == 0)
-            {
-                PrintRed("Invalid AppID.");
-                WaitForKey();
-                return;
-            }
-
-            Console.WriteLine();
-            PrintLine($"This will redirect cloud saves for AppID {appId} to:");
-            PrintLine($"  C:\\CloudRedirect\\saves\\");
-            Console.WriteLine();
             Console.Write("  Continue? [Y/n] ");
             var confirm = Console.ReadKey(true);
             Console.WriteLine(confirm.KeyChar);
@@ -502,15 +552,17 @@ namespace CloudFix
             if (confirm.KeyChar is 'n' or 'N')
                 return;
 
-            var result = patcher.ApplyCloudRedirect(appId);
+            var result = patcher.ApplyCloudRedirect();
             if (!result.Succeeded && IsWrongVersionError(result.Error) && OfferDllReplace(patcher))
-                result = patcher.ApplyCloudRedirect(appId);
+                result = patcher.ApplyCloudRedirect();
             Console.WriteLine();
             if (result.Succeeded)
             {
-                PrintGreen($"CloudRedirect: enabled for AppID {appId}");
-                PrintLine($"  Saves will be stored in C:\\CloudRedirect\\saves\\");
-                PrintLine($"  Logs will be written to C:\\CloudRedirect\\cloud_redirect.log");
+                PrintGreen("CloudRedirect: enabled");
+                Console.WriteLine();
+
+                OfferGoogleDriveSignIn();
+
                 if (!OfferSteamRestart())
                     WaitForKey();
             }
@@ -518,6 +570,50 @@ namespace CloudFix
             {
                 PrintRed($"Error: {result.Error}");
                 WaitForKey();
+            }
+        }
+
+        static void OfferGoogleDriveSignIn()
+        {
+            var status = GoogleDriveAuth.GetStatus();
+            if (status == GoogleDriveAuth.Status.Authenticated)
+            {
+                PrintGreen("Google Drive: signed in");
+                return;
+            }
+
+            PrintLine("Google Drive sync lets you access cloud saves across machines.");
+            Console.Write("  Sign in to Google Drive now? [Y/n] ");
+            var key = Console.ReadKey(true);
+            Console.WriteLine(key.KeyChar);
+            Console.WriteLine();
+
+            if (key.KeyChar is 'n' or 'N')
+                return;
+
+            RunGoogleDriveSignIn();
+        }
+
+        static void RunGoogleDriveSignIn()
+        {
+            PrintLine("Opening browser for Google sign-in...");
+            PrintLine("(waiting up to 2 minutes)");
+            Console.WriteLine();
+
+            try
+            {
+                var err = GoogleDriveAuth.RunSignIn().GetAwaiter().GetResult();
+                if (err != null)
+                {
+                    PrintRed(err);
+                    return;
+                }
+                PrintGreen("Google Drive: signed in successfully");
+                PrintLine($"  Tokens saved to {GoogleDriveAuth.TokenPath}");
+            }
+            catch (Exception ex)
+            {
+                PrintRed($"Sign-in error: {ex.Message}");
             }
         }
 
