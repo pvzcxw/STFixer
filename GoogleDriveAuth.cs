@@ -17,7 +17,7 @@ namespace CloudFix
     {
         const string ClientId = "202264815644.apps.googleusercontent.com";
         const string ClientSecret = "X4Z3ca8xfWDb1Voo-F9a7ZxJ";
-        const string Scope = "https://www.googleapis.com/auth/drive.file";
+        const string Scope = "https://www.googleapis.com/auth/drive";
         const string TokenExchangeUrl = "https://oauth2.googleapis.com/token";
 
         public const string TokenFilename = "tokens.json";
@@ -26,7 +26,11 @@ namespace CloudFix
 
         public static void Init(string steamPath)
         {
-            TokenPath = Path.Combine(steamPath, TokenFilename);
+            // tokens live in %APPDATA%\CloudRedirect\ so each Windows user gets their own
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var dir = Path.Combine(appData, "CloudRedirect");
+            Directory.CreateDirectory(dir);
+            TokenPath = Path.Combine(dir, TokenFilename);
         }
 
         public enum Status { Authenticated, NotAuthenticated, Error }
