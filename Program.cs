@@ -446,7 +446,13 @@ namespace CloudFix
 
             string backendLabel = CloudConfig.BackendDisplayName();
             if (driveStatus == OneDriveAuth.Status.Authenticated)
-                PrintGreen($"{backendLabel,-22} signed in");
+            {
+                if (!patcher.IsCloudRedirectDllCurrent()
+                    && patcher.GetCloudRedirectPatchState() == PatchState.Patched)
+                    PrintYellow($"{backendLabel,-22} signed in (DLL outdated)");
+                else
+                    PrintGreen($"{backendLabel,-22} signed in");
+            }
             else
                 PrintLine($"{backendLabel,-22} not configured (use option 3)");
 
@@ -569,6 +575,20 @@ namespace CloudFix
             if (state == PatchState.Patched)
             {
                 PrintGreen("CloudRedirect is already active.");
+
+                // check if the deployed DLL matches the embedded one
+                if (!patcher.IsCloudRedirectDllCurrent())
+                {
+                    Console.WriteLine();
+                    PrintYellow("cloud_redirect.dll is outdated. Updating..");
+                    var deployErr = patcher.UpdateCloudRedirectDll();
+                    if (deployErr != null)
+                        PrintRed($"  Update failed: {deployErr}");
+                    else
+                    {
+                        PrintGreen("  DLL updated. Restart Steam for changes to take effect.");
+                    }
+                }
                 Console.WriteLine();
 
                 var backend = CloudConfig.GetBackend();

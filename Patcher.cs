@@ -659,6 +659,37 @@ namespace CloudFix
             return deployedBytes.AsSpan().SequenceEqual(embedded);
         }
 
+        public bool IsCloudRedirectDllCurrent()
+        {
+            var deployed = Path.Combine(_steamPath, "cloud_redirect.dll");
+            if (!File.Exists(deployed))
+                return false;
+
+            byte[] deployedBytes;
+            try { deployedBytes = ReadFileShared(deployed); }
+            catch (IOException) { return false; }
+
+            using var stream = typeof(Patcher).Assembly
+                .GetManifestResourceStream("cloud_redirect.dll");
+            if (stream == null)
+                return false;
+
+            var embedded = new byte[stream.Length];
+            stream.ReadExactly(embedded);
+
+            if (deployedBytes.Length != embedded.Length)
+                return false;
+
+            return deployedBytes.AsSpan().SequenceEqual(embedded);
+        }
+
+        // redeploy cloud_redirect.dll if embedded version is newer
+        public string UpdateCloudRedirectDll()
+        {
+            _verbose = true;
+            return DeployCloudRedirect();
+        }
+
         public bool NeedsDllRepair()
         {
             foreach (var name in HijackCandidates)
