@@ -15,23 +15,23 @@ This tool also can fix other weird SteamTools behaviors. You can install SteamTo
 
 ## Usage
 
-1. Download `CloudFix.exe` from the [latest release](https://github.com/Selectively11/CloudFix/releases/latest)
+1. Download `STFixer.exe` from the [latest release](https://github.com/Selectively11/STFixer/releases/latest)
 2. Run it
 3. Select whichever patch you want
 4. Restart Steam when prompted, or return to the main menu and run any other patches you want. Once you are done, restart Steam.
 
-To undo the patch, run CloudFix again and select **Disable (restore originals)**.
+To undo the patch, run STFixer again and select **Disable (restore originals)**.
 
 If you get a Capcom save error even after enabling this tool, disable Steam Cloud for the affected game in the Steam properties page for that game, clear the userdata folder for the game (`<Steam install path>\userdata\<steamid>\<appid>`), restart Steam, and try again.
 
 ## What we do
 
-CloudFix patches the SteamTools DLLs as well as its encrypted payload cache to make it better. Original files are backed up automatically and can be restored at any time through the Disable option.
+STFixer patches the SteamTools DLLs as well as its encrypted payload cache to make it better. Original files are backed up automatically and can be restored at any time through the Disable option.
 
 ## Notes
 
-- CloudFix auto-detects your Steam install path from the registry, but you can override this
+- STFixer auto-detects your Steam install path from the registry, but you can override this
 - Backups are created before any changes are made
-- If SteamTools updates, you may need to re-run CloudFix
+- If SteamTools updates, you may need to re-run STFixer
 - The tool checks for updates on launch
 - This tool is likely to break with an update to SteamTools, but I use SteamTools personally so you can expect me to keep it up to date.
