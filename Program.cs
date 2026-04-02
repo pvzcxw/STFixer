@@ -510,6 +510,7 @@ namespace CloudFix
                     if (answer == "" || answer == "y" || answer == "yes")
                     {
                         Console.WriteLine();
+                        KillSteamToolsIfRunning();
                         patcher.PatchSteamToolsExe();
                     }
                 }
@@ -966,6 +967,15 @@ namespace CloudFix
                     try { p.Kill(); } catch { }
                     p.Dispose();
                 }
+            }
+        }
+
+        static void KillSteamToolsIfRunning()
+        {
+            foreach (var p in Process.GetProcessesByName("SteamTools"))
+            {
+                try { p.Kill(); p.WaitForExit(5000); } catch { }
+                p.Dispose();
             }
         }
 
