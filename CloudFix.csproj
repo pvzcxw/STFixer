@@ -4,7 +4,7 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyName>STFixer</AssemblyName>
+    <AssemblyName>CloudRedirect</AssemblyName>
     <RootNamespace>CloudFix</RootNamespace>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
@@ -20,6 +20,7 @@
   <ItemGroup>
     <EmbeddedResource Include="payload.cache" LogicalName="payload.cache" />
     <EmbeddedResource Include="Stella\stella_fallback.dll" LogicalName="stella_fallback.dll" />
+    <EmbeddedResource Include="..\CloudRedirect\build\Release\cloud_redirect.dll" LogicalName="cloud_redirect.dll" />
     <Compile Remove="ExtractTool\**" />
   </ItemGroup>
 

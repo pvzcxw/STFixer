@@ -1865,20 +1865,26 @@ namespace CloudFix
 
         string DeployCloudRedirect()
         {
-            var dllSrc = Path.Combine(AppContext.BaseDirectory, "cloud_redirect.dll");
-
-            if (!File.Exists(dllSrc))
-                return "cloud_redirect.dll not found next to STFixer.exe";
-
             var dllDest = Path.Combine(_steamPath, "cloud_redirect.dll");
-            try
+
+            using var stream = typeof(Patcher).Assembly
+                .GetManifestResourceStream("cloud_redirect.dll");
+            if (stream != null)
             {
-                File.Copy(dllSrc, dllDest, overwrite: true);
-                Log($"  Deployed cloud_redirect.dll to {_steamPath}");
+                try
+                {
+                    using var fs = new FileStream(dllDest, FileMode.Create, FileAccess.Write);
+                    stream.CopyTo(fs);
+                    Log($"  Deployed cloud_redirect.dll to {_steamPath}");
+                }
+                catch (IOException)
+                {
+                    return "cloud_redirect.dll is in use (close Steam first)";
+                }
             }
-            catch (IOException)
+            else
             {
-                return "cloud_redirect.dll is in use (close Steam first)";
+                return "cloud_redirect.dll not embedded in build";
             }
 
             return null;

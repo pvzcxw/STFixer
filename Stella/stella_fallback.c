@@ -213,7 +213,7 @@ __declspec(dllexport) unsigned __int64 __fastcall StellaGetRequestCode(
     HINTERNET hSession = NULL, hConnect = NULL, hRequest = NULL;
     unsigned __int64 result = 0;
 
-    hSession = WinHttpOpen(L"Stella/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+    hSession = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession)
     {
