@@ -829,143 +829,89 @@ namespace CloudFix
             return Convert.ToHexString(hash).ToLowerInvariant();
         }
 
-        public PatchResult ApplyFallback(string apiKey)
+        public bool HasFallbackRemnants()
+        {
+            var state = GetFallbackPatchState();
+            if (state == PatchState.Patched || state == PatchState.PartiallyPatched || state == PatchState.OutOfDate)
+                return true;
+
+            string[] stellaFiles = { "stella_fallback.dll", "stella.cfg" };
+            foreach (var name in stellaFiles)
+            {
+                if (File.Exists(Path.Combine(_steamPath, name)))
+                    return true;
+            }
+            return false;
+        }
+
+        public PatchResult RevertFallback()
         {
             _verbose = true;
             var result = new PatchResult();
 
             try
             {
-                // core DLL patches must be applied first - the hash check bypass
-                // is required or the DLL will reject our modified payload
-                var hijackDll = FindCoreDll();
-                if (hijackDll == null)
-                    return result.Fail("SteamTools Core DLL not found. Is SteamTools installed?");
-
-                var dllPath = Path.Combine(_steamPath, hijackDll);
-                byte[] dllData;
-                try { dllData = ReadFileShared(dllPath); }
-                catch (IOException) { return result.Fail($"{hijackDll} is in use - close Steam first"); }
-
-                var resolvedCore = ResolveCorePatchOffsets(dllData);
-                if (resolvedCore == null)
-                    return result.Fail($"Could not identify patch locations in {hijackDll} - unsupported version?");
-
-                var (patchedDll, dllApplied, dllSkipped, dllErrors) = ApplyPatches(dllData, resolvedCore);
-                if (dllErrors.Count > 0)
-                {
-                    foreach (var err in dllErrors) Log(err);
-                    return result.Fail("Byte mismatch in " + hijackDll + " - wrong version?");
-                }
-
                 var cachePath = Fingerprint.FindCachePath(_steamPath);
-                if (cachePath == null)
+                if (cachePath != null)
                 {
-                    Log("Payload cache not found. Deploying embedded payload..");
-                    cachePath = DeployEmbeddedPayload();
-                    if (cachePath == null)
-                        return result.Fail("Could not deploy payload cache.");
+                    var (payload, iv, plErr) = ReadAndDecryptPayload(cachePath);
+                    if (payload != null)
+                    {
+                        var resolved = ResolveFallbackPatchOffsets(payload);
+                        if (resolved != null)
+                        {
+                            bool changed = false;
+                            var buf = (byte[])payload.Clone();
+
+                            // Reverse each fallback patch (write original bytes back)
+                            foreach (var p in resolved.Patches)
+                            {
+                                if (BytesMatch(buf, p.Offset, p.Replacement, 0, p.Replacement.Length))
+                                {
+                                    Buffer.BlockCopy(p.Original, 0, buf, p.Offset, p.Original.Length);
+                                    changed = true;
+                                }
+                            }
+
+                            // Zero out the code cave
+                            if (resolved.CodeCaveFileOffset + resolved.DynamicCodeCave.Length <= buf.Length)
+                            {
+                                bool cavePresent = BytesMatch(buf, resolved.CodeCaveFileOffset,
+                                    resolved.DynamicCodeCave, 0, resolved.DynamicCodeCave.Length);
+                                if (cavePresent)
+                                {
+                                    Array.Clear(buf, resolved.CodeCaveFileOffset, resolved.DynamicCodeCave.Length);
+                                    changed = true;
+                                }
+                            }
+
+                            if (changed)
+                            {
+                                Backup(cachePath);
+                                ReEncryptAndWrite(cachePath, buf, iv);
+                                Log("  Fallback patches removed from payload");
+                            }
+                            else
+                            {
+                                Log("  Payload: fallback patches already removed");
+                            }
+
+                            result.CachePatched = true;
+                        }
+                    }
                 }
 
-                Log("Patching payload (Morrenus fallback)..");
-                Backup(cachePath);
-
-                var (payload, iv, plErr) = ReadAndDecryptPayload(cachePath);
-                if (payload == null)
-                    return result.Fail(plErr);
-
-                var resolved = ResolveFallbackPatchOffsets(payload);
-                if (resolved == null)
-                    return result.Fail("Could not locate fallback patch sites in payload");
-
-                var (patchedPayload, plApplied, plSkipped, plErrors) = ApplyPatches(payload, resolved.Patches);
-                if (plErrors.Count > 0)
-                {
-                    foreach (var err in plErrors) Log(err);
-                    return result.Fail("Byte mismatch at fallback patch sites");
-                }
-
-                if (resolved.CodeCaveFileOffset + resolved.DynamicCodeCave.Length > patchedPayload.Length)
-                    return result.Fail("Payload too small for code cave injection");
-
-                bool caveAlready = BytesMatch(patchedPayload, resolved.CodeCaveFileOffset,
-                    resolved.DynamicCodeCave, 0, resolved.DynamicCodeCave.Length);
-
-                var stellaErr = DeployStella(apiKey);
-                if (stellaErr != null)
-                    return result.Fail(stellaErr);
-
-                // write core DLL patches (hash check bypass)
-                Backup(dllPath);
-                if (dllApplied > 0)
-                {
-                    File.WriteAllBytes(dllPath, patchedDll);
-                    Log($"  {dllApplied} core patch(es) applied to {hijackDll}");
-                }
-                result.DllPatched = true;
-
-                if (plApplied > 0 || !caveAlready)
-                {
-                    Buffer.BlockCopy(resolved.DynamicCodeCave, 0, patchedPayload,
-                        resolved.CodeCaveFileOffset, resolved.DynamicCodeCave.Length);
-                    ReEncryptAndWrite(cachePath, patchedPayload, iv);
-                    int total = plApplied + (caveAlready ? 0 : 1);
-                    Log($"  {total} change(s) applied" + (plSkipped > 0 ? $", {plSkipped} already done" : ""));
-                }
-                else
-                {
-                    Log("  Already patched");
-                }
-                result.CachePatched = true;
-
+                CleanupStellaFiles();
                 result.Succeeded = true;
-                Log("Done.");
+                Log("Fallback cleanup complete.");
             }
             catch (Exception ex)
             {
-                result.Fail($"Unexpected error: {ex.Message}");
+                result.Fail($"Revert failed: {ex.Message}");
                 Log($"Error: {ex.Message}");
             }
 
             return result;
-        }
-
-        string DeployStella(string apiKey)
-        {
-            var dllDest = Path.Combine(_steamPath, "stella_fallback.dll");
-            var cfgDest = Path.Combine(_steamPath, "stella.cfg");
-
-            using var stream = typeof(Patcher).Assembly
-                .GetManifestResourceStream("stella_fallback.dll");
-            if (stream != null)
-            {
-                try
-                {
-                    using var fs = new FileStream(dllDest, FileMode.Create, FileAccess.Write);
-                    stream.CopyTo(fs);
-                    Log($"  Deployed stella_fallback.dll to {_steamPath}");
-                }
-                catch (IOException)
-                {
-                    return "stella_fallback.dll is in use (close Steam first)";
-                }
-            }
-            else
-            {
-                return "stella_fallback.dll not embedded in build";
-            }
-
-            if (!string.IsNullOrWhiteSpace(apiKey))
-            {
-                File.WriteAllText(cfgDest, apiKey.Trim());
-                Log($"  Wrote API key to stella.cfg");
-            }
-            else if (!File.Exists(cfgDest))
-            {
-                return "no API key provided and stella.cfg not found";
-            }
-
-            return null;
         }
 
         void Log(string msg)

@@ -2,10 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Reflection;
-using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Win32;
 
@@ -26,7 +23,6 @@ namespace CloudFix
         }
 
         static string _steamPath;
-        static ApiKeyStatus? _apiKeyStatus;
 
         static void Main(string[] args)
         {
@@ -94,7 +90,29 @@ namespace CloudFix
             PrintSep();
 
             var patcher = new Patcher(_steamPath);
-            _apiKeyStatus = CheckApiKeyStatus();
+
+            // detect leftover Morrenus fallback and offer to revert
+            if (patcher.HasFallbackRemnants())
+            {
+                Console.WriteLine();
+                PrintYellow("Morrenus fallback detected!");
+                PrintLine("The Morrenus API has been shut down because SteamTools is back up.");
+                PrintLine("The fallback patches are no longer needed and should be removed.");
+                Console.WriteLine();
+                Console.Write("  Revert fallback patches now? [Y/n] ");
+                var revertKey = Console.ReadKey(true);
+                Console.WriteLine(revertKey.KeyChar);
+                Console.WriteLine();
+                if (revertKey.KeyChar is not ('n' or 'N'))
+                {
+                    var revertResult = patcher.RevertFallback();
+                    if (revertResult.Succeeded)
+                        PrintGreen("Fallback patches removed successfully.");
+                    else
+                        PrintRed($"Could not revert fallback: {revertResult.Error}");
+                    WaitForKey();
+                }
+            }
 
             while (true)
             {
@@ -108,21 +126,15 @@ namespace CloudFix
                 PrintMenuItem("1. Setup SteamTools Offline", "makes new SteamTools installations work if servers are down");
                 PrintMenuItem("2. Capcom Game Save Fix", "fixes games that will not create saves");
                 bool anyPatched = patcher.GetOfflinePatchState() == PatchState.Patched
-                    || patcher.GetPatchState() == PatchState.Patched
-                    || patcher.GetFallbackPatchState() == PatchState.Patched;
+                    || patcher.GetPatchState() == PatchState.Patched;
                 int stState = patcher.GetSteamToolsExePatchState();
                 if (anyPatched && stState == 1)
                     PrintMenuItem("3. Patch SteamTools App", "prevents SteamTools Desktop from overwriting patches");
                 else
                     PrintMenuItem("3. This space intentionally left blank", null);
-                var fallbackColor = patcher.GetFallbackPatchState() == PatchState.Patched
-                    ? ConsoleColor.White : ConsoleColor.Cyan;
-                PrintMenuItem("4. Enable Morrenus fallback", "fixes \"No Internet Connection\" error", fallbackColor);
-                PrintMenuItem("5. Test Morrenus API", "checks if your ISP is blocking the API/if your API key is bad");
-                PrintMenuItem("6. Update Morrenus API key", "update your expired API key here");
-                PrintMenuItem("7. Repair SteamTools DLLs", "checks for the core SteamTools DLLs and replaces missing DLLs");
-                PrintMenuItem("8. Disable Everything", "restore original files");
-                PrintMenuItem("9. Exit", null);
+                PrintMenuItem("4. Repair SteamTools DLLs", "checks for the core SteamTools DLLs and replaces missing DLLs");
+                PrintMenuItem("5. Disable Everything", "restore original files");
+                PrintMenuItem("6. Exit", null);
                 Console.WriteLine();
                 Console.Write("  > ");
 
@@ -240,49 +252,10 @@ namespace CloudFix
                         PrintLine($"Steam: {_steamPath}");
                         PrintSep();
                         Console.WriteLine();
-                        PrintLine("If a specific SteamTools service is down, manifests cannot be");
-                        PrintLine("retrieved for games that are not owned. A user experiences this");
-                        PrintLine("as a 'No Internet Connection' error in Steam. This fixes that.");
-                        Console.WriteLine();
-                        Console.Write("  Continue? [Y/n] ");
-                        var fallbackConfirm = Console.ReadKey(true);
-                        Console.WriteLine(fallbackConfirm.KeyChar);
-                        Console.WriteLine();
-                        if (fallbackConfirm.KeyChar is 'n' or 'N')
-                            break;
-                        RunFallbackSetup(patcher);
-                        _apiKeyStatus = CheckApiKeyStatus();
-                        break;
-
-                    case '5':
-                        ClearScreen();
-                        PrintHeader();
-                        PrintLine($"Steam: {_steamPath}");
-                        PrintSep();
-                        Console.WriteLine();
-                        RunApiTest();
-                        break;
-
-                    case '6':
-                        ClearScreen();
-                        PrintHeader();
-                        PrintLine($"Steam: {_steamPath}");
-                        PrintSep();
-                        Console.WriteLine();
-                        RunUpdateApiKey();
-                        _apiKeyStatus = CheckApiKeyStatus();
-                        break;
-
-                    case '7':
-                        ClearScreen();
-                        PrintHeader();
-                        PrintLine($"Steam: {_steamPath}");
-                        PrintSep();
-                        Console.WriteLine();
                         RunDllRepair(patcher);
                         break;
 
-                    case '8':
+                    case '5':
                         ClearScreen();
                         PrintHeader();
                         PrintLine($"Steam: {_steamPath}");
@@ -312,7 +285,7 @@ namespace CloudFix
                         }
                         break;
 
-                    case '9':
+                    case '6':
                         Console.Write("  Are you sure you want to exit? [Y/n] ");
                         var exitConfirm = Console.ReadKey(true);
                         Console.WriteLine(exitConfirm.KeyChar);
@@ -353,7 +326,7 @@ namespace CloudFix
                         PrintRed("Either wait for an update to this tool or run sm0k3r to downgrade!");
                     }
                     else
-                        PrintRed($"Expected version {ExpectedVersion}. Fallback WILL NOT WORK unless you update Steam!");
+                        PrintRed($"Expected version {ExpectedVersion}. Patches may not work unless you update Steam!");
                 }
             }
             else
@@ -399,33 +372,9 @@ namespace CloudFix
 
             if (cloudState == PatchState.NotInstalled)
             {
-                PrintLine("  Use option 7 to download SteamTools DLLs");
+                PrintLine("  Use option 4 to download SteamTools DLLs");
                 return;
             }
-
-            var fallbackState = patcher.GetFallbackPatchState();
-            string fallbackLabel = fallbackState switch
-            {
-                PatchState.Unpatched => "not patched",
-                PatchState.Patched => "active",
-                PatchState.OutOfDate => "out of date",
-                PatchState.PartiallyPatched => "partially patched",
-                PatchState.UnknownVersion => "unknown payload version",
-                PatchState.NotInstalled => "payload not found",
-                _ => "unknown"
-            };
-
-            if (fallbackState == PatchState.Patched)
-            {
-                if (!patcher.IsStellaDllCurrent())
-                    PrintYellow($"Fallback:              {fallbackLabel} (DLL outdated)");
-                else
-                    PrintGreen($"Fallback:              {fallbackLabel}");
-            }
-            else if (fallbackState == PatchState.OutOfDate)
-                PrintYellow($"Fallback:              {fallbackLabel}");
-            else
-                PrintRed($"Fallback:              {fallbackLabel}");
 
             var stState = patcher.GetSteamToolsExePatchState();
             if (stState >= 0)
@@ -437,8 +386,7 @@ namespace CloudFix
                 {
                     PrintYellow("SteamTools: unpatched");
                     bool anyPatched = offlineState == PatchState.Patched
-                        || cloudState == PatchState.Patched
-                        || fallbackState == PatchState.Patched;
+                        || cloudState == PatchState.Patched;
                     if (anyPatched)
                     {
                         PrintYellow("SteamTools patches are enabled but SteamTools Desktop App is unpatched.");
@@ -450,252 +398,13 @@ namespace CloudFix
 
             bool allGood = cloudState == PatchState.Patched
                 && offlineState == PatchState.Patched
-                && fallbackState == PatchState.Patched
-                && patcher.IsStellaDllCurrent()
                 && stState <= 0;
 
             if (allGood)
             {
                 Console.WriteLine();
-                if (_apiKeyStatus == null || _apiKeyStatus == ApiKeyStatus.Good || _apiKeyStatus == ApiKeyStatus.NoKey)
-                {
-                    if (_apiKeyStatus == ApiKeyStatus.Good)
-                        PrintGreen("API key is valid and the API is responding correctly!");
-                    Console.WriteLine();
-                    PrintGreen("Everything is configured correctly!");
-                }
-                else if (_apiKeyStatus == ApiKeyStatus.Expired)
-                {
-                    PrintRed("API key:               expired or invalid");
-                    PrintRed("Use option 6 to update your API key.");
-                }
-                else if (_apiKeyStatus == ApiKeyStatus.SslBlocked)
-                {
-                    PrintRed("Your ISP is blocking the API! Turn off Advanced Security in your");
-                    PrintRed("ISP's app if they have that feature. Alternatively, use a VPN.");
-                }
-                else
-                {
-                    PrintYellow("API key:               could not verify (network error)");
-                }
+                PrintGreen("Everything is configured correctly!");
             }
-        }
-
-        static void RunFallbackSetup(Patcher patcher)
-        {
-            if (patcher.NeedsDllRepair())
-            {
-                if (!OfferDllRepair(patcher))
-                {
-                    WaitForKey();
-                    return;
-                }
-            }
-
-            string apiKey = null;
-            var cfgPath = Path.Combine(_steamPath, "stella.cfg");
-
-            if (File.Exists(cfgPath))
-            {
-                var existing = File.ReadAllText(cfgPath).Trim();
-                if (IsValidApiKey(existing))
-                {
-                    PrintLine("stella.cfg found, using existing API key.");
-                }
-                else
-                {
-                    PrintRed("stella.cfg exists but key is invalid.");
-                    File.Delete(cfgPath);
-                }
-            }
-
-            if (!File.Exists(cfgPath))
-            {
-                while (true)
-                {
-                    PrintLine("Enter your Morrenus API key (or leave blank to cancel):");
-                    Console.Write("  > ");
-                    apiKey = Console.ReadLine()?.Trim();
-
-                    if (string.IsNullOrWhiteSpace(apiKey))
-                        return;
-
-                    if (IsValidApiKey(apiKey))
-                        break;
-
-                    PrintRed("Invalid key. Make sure you are copying the key correctly.");
-                    Console.WriteLine();
-                }
-            }
-
-            var result = patcher.ApplyFallback(apiKey);
-            if (!result.Succeeded && IsWrongVersionError(result.Error) && OfferDllReplace(patcher))
-                result = patcher.ApplyFallback(apiKey);
-            Console.WriteLine();
-            if (result.Succeeded)
-            {
-                PrintGreen("Morrenus fallback: enabled");
-                OfferSteamToolsExePatch(patcher);
-                if (!OfferSteamRestart())
-                    WaitForKey();
-            }
-            else
-            {
-                PrintRed($"Error: {result.Error}");
-                WaitForKey();
-            }
-        }
-
-        static void RunApiTest()
-        {
-            var cfgPath = Path.Combine(_steamPath, "stella.cfg");
-            if (!File.Exists(cfgPath))
-            {
-                PrintRed("stella.cfg not found in Steam directory.");
-                PrintLine("Run 'Enable Morrenus fallback' first to set up your API key.");
-                WaitForKey();
-                return;
-            }
-
-            string apiKey;
-            try { apiKey = File.ReadAllText(cfgPath).Trim(); }
-            catch (IOException ex)
-            {
-                PrintRed($"Could not read stella.cfg: {ex.Message}");
-                WaitForKey();
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(apiKey))
-            {
-                PrintRed("stella.cfg is empty.");
-                WaitForKey();
-                return;
-            }
-
-            PrintLine("API key loaded from stella.cfg");
-            Console.WriteLine();
-
-            ulong depotId, manifestId;
-
-            Console.WriteLine("  1. Test with Grind Survivors");
-            Console.WriteLine("  2. Specify depot + manifest ID");
-            Console.WriteLine("  3. Return to main menu");
-            Console.WriteLine();
-            Console.Write("  > ");
-            var testChoice = Console.ReadKey(true);
-            Console.WriteLine(testChoice.KeyChar);
-            Console.WriteLine();
-
-            if (testChoice.KeyChar == '3')
-                return;
-
-            if (testChoice.KeyChar == '1')
-            {
-                depotId = 3816931;
-                manifestId = 3636809188681531478;
-                PrintLine($"Depot: {depotId}  Manifest: {manifestId}");
-            }
-            else
-            {
-                Console.Write("  Depot ID: ");
-                var depotStr = Console.ReadLine()?.Trim();
-                if (!ulong.TryParse(depotStr, out depotId) || depotId == 0)
-                {
-                    PrintRed("Invalid depot ID.");
-                    WaitForKey();
-                    return;
-                }
-
-                Console.Write("  Manifest ID: ");
-                var manifestStr = Console.ReadLine()?.Trim();
-                if (!ulong.TryParse(manifestStr, out manifestId) || manifestId == 0)
-                {
-                    PrintRed("Invalid manifest ID.");
-                    WaitForKey();
-                    return;
-                }
-            }
-
-            Console.WriteLine();
-
-            try
-            {
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-                http.DefaultRequestHeaders.UserAgent.ParseAdd("Stella/1.0");
-
-                PrintLine("Requesting code from manifest.morrenus.xyz..");
-
-                var apiUrl = $"https://manifest.morrenus.xyz/api/v1/generate/requestcode" +
-                             $"?depot_id={depotId}&manifest_id={manifestId}";
-                var apiReq = new HttpRequestMessage(HttpMethod.Get, apiUrl);
-                apiReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-
-                var apiResp = http.SendAsync(apiReq).GetAwaiter().GetResult();
-                var apiBody = apiResp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-
-                PrintLine($"API: HTTP {(int)apiResp.StatusCode} {apiResp.ReasonPhrase}");
-
-                if (!string.IsNullOrEmpty(apiBody))
-                    PrintLine($"Response: {apiBody}");
-
-                if (!apiResp.IsSuccessStatusCode)
-                {
-                    Console.WriteLine();
-                    PrintRed("API request failed");
-                    WaitForKey();
-                    return;
-                }
-
-                ulong requestCode = 0;
-                try
-                {
-                    using var doc = JsonDocument.Parse(apiBody);
-                    if (doc.RootElement.TryGetProperty("request_code", out var rc))
-                    {
-                        if (rc.ValueKind == JsonValueKind.Number)
-                            requestCode = rc.GetUInt64();
-                        else if (rc.ValueKind == JsonValueKind.String)
-                            ulong.TryParse(rc.GetString(), out requestCode);
-                    }
-                }
-                catch (JsonException)
-                {
-                    Console.WriteLine();
-                    PrintRed("Response is not valid JSON");
-                    WaitForKey();
-                    return;
-                }
-
-                if (requestCode == 0)
-                {
-                    Console.WriteLine();
-                    PrintRed("request_code is 0 or missing (depot/manifest may not exist)");
-                    WaitForKey();
-                    return;
-                }
-
-                PrintGreen($"request_code: {requestCode}");
-                Console.WriteLine();
-                PrintGreen("API connection is working");
-            }
-            catch (HttpRequestException ex)
-            {
-                Console.WriteLine();
-                PrintRed($"Connection failed: {ex.Message}");
-            }
-            catch (AggregateException ex) when (ex.InnerException is TaskCanceledException)
-            {
-                Console.WriteLine();
-                PrintRed("Request timed out");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine();
-                PrintRed($"Error: {ex.Message}");
-            }
-
-            WaitForKey();
         }
 
         static void RunDllRepair(Patcher patcher)
@@ -718,58 +427,6 @@ namespace CloudFix
                 PrintGreen("DLLs repaired successfully.");
             else
                 PrintRed($"Repair failed: {result.Error}");
-
-            WaitForKey();
-        }
-
-        static void RunUpdateApiKey()
-        {
-            var cfgPath = Path.Combine(_steamPath, "stella.cfg");
-
-            if (File.Exists(cfgPath))
-            {
-                try
-                {
-                    var existing = File.ReadAllText(cfgPath).Trim();
-                    if (existing.Length > 8)
-                        PrintLine($"Current key: {existing[..4]}...{existing[^4..]}");
-                    else if (existing.Length > 0)
-                        PrintLine($"Current key: {existing}");
-                }
-                catch { }
-            }
-            else
-            {
-                PrintLine("No API key configured.");
-            }
-
-            Console.WriteLine();
-            string newKey;
-            while (true)
-            {
-                PrintLine("Enter new Morrenus API key (or leave blank to cancel):");
-                Console.Write("  > ");
-                newKey = Console.ReadLine()?.Trim();
-
-                if (string.IsNullOrWhiteSpace(newKey))
-                    return;
-
-                if (IsValidApiKey(newKey))
-                    break;
-
-                PrintRed("Invalid key. Make sure you are copying the key correctly.");
-                Console.WriteLine();
-            }
-
-            try
-            {
-                File.WriteAllText(cfgPath, newKey);
-                PrintGreen("API key saved to stella.cfg");
-            }
-            catch (Exception ex)
-            {
-                PrintRed($"Could not write stella.cfg: {ex.Message}");
-            }
 
             WaitForKey();
         }
@@ -838,19 +495,6 @@ namespace CloudFix
                 try { if (File.Exists(path)) File.Delete(path); }
                 catch { }
             }
-        }
-
-        static bool IsValidApiKey(string key)
-        {
-            if (key.Length != 100 || !key.StartsWith("smm_"))
-                return false;
-            for (int i = 4; i < key.Length; i++)
-            {
-                char c = key[i];
-                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
-                    return false;
-            }
-            return true;
         }
 
         static string DetectSteamPath()
@@ -1016,45 +660,6 @@ namespace CloudFix
             {
                 try { p.Kill(); p.WaitForExit(5000); } catch { }
                 p.Dispose();
-            }
-        }
-
-        enum ApiKeyStatus { Good, Expired, SslBlocked, NetworkError, NoKey }
-
-        static ApiKeyStatus CheckApiKeyStatus()
-        {
-            var cfgPath = Path.Combine(_steamPath, "stella.cfg");
-            if (!File.Exists(cfgPath))
-                return ApiKeyStatus.NoKey;
-
-            string apiKey;
-            try { apiKey = File.ReadAllText(cfgPath).Trim(); }
-            catch { return ApiKeyStatus.NoKey; }
-
-            if (string.IsNullOrWhiteSpace(apiKey) || !IsValidApiKey(apiKey))
-                return ApiKeyStatus.NoKey;
-
-            try
-            {
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-                var url = $"https://manifest.morrenus.xyz/api/v1/user/stats?api_key={apiKey}";
-                var resp = http.GetAsync(url).GetAwaiter().GetResult();
-
-                if ((int)resp.StatusCode == 401)
-                    return ApiKeyStatus.Expired;
-
-                if (!resp.IsSuccessStatusCode)
-                    return ApiKeyStatus.NetworkError;
-
-                return ApiKeyStatus.Good;
-            }
-            catch (HttpRequestException ex) when (ex.InnerException is System.Security.Authentication.AuthenticationException)
-            {
-                return ApiKeyStatus.SslBlocked;
-            }
-            catch
-            {
-                return ApiKeyStatus.NetworkError;
             }
         }
 
